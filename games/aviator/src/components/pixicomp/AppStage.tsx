@@ -42,7 +42,7 @@ const AppStage = ({ payout, game_anim_status, dimension, pixiDimension, trigPara
     const gradTexture = useMemo(() => createGradTexture(dimension), [dimension])
 
     const handleResize = () => {
-        setPlaneScale(interpolate(window.innerWidth, 400, 1920, 0.5, 0.2))
+        setPlaneScale(interpolate(window.innerWidth, 400, 1920, 1.3, 0.2))
         setPulseBase(interpolate(window.innerWidth, 400, 1920, 0.6, 0.8))
     }
     useEffect(() => {
@@ -161,7 +161,7 @@ const AppStage = ({ payout, game_anim_status, dimension, pixiDimension, trigPara
                                 pivot={{ x: 0.08, y: 0.54 }}
                                 textures={parachuteMeFrames}
                                 anchor={{ x: 0.4, y: 0.45 }}
-                                scale={2}
+                                scale={interpolate(window.innerWidth, 400, 1920, 4, 2)}
                                 animationSpeed={0.3}
                                 isPlaying={true}
                                 initialFrame={0}
@@ -177,7 +177,7 @@ const AppStage = ({ payout, game_anim_status, dimension, pixiDimension, trigPara
                                 pivot={{ x: 0.08, y: 0.54 }}
                                 textures={parachuteElseFrames}
                                 anchor={{ x: 0.4, y: 0.45 }}
-                                scale={2}
+                                scale={interpolate(window.innerWidth, 400, 1920, 4, 2)}
                                 animationSpeed={0.3}
                                 isPlaying={true}
                                 initialFrame={0}
@@ -196,7 +196,7 @@ const AppStage = ({ payout, game_anim_status, dimension, pixiDimension, trigPara
                         new TextStyle({
                             align: 'center',
                             fontFamily: 'Roboto',
-                            fontSize: 100,
+                            fontSize: interpolate(window.innerWidth, 400, 1920, 480, 100),
                             fontWeight: '700',
                             fill: ['#ffffff', '#ffffff'], // gradient
                             stroke: '#111111',

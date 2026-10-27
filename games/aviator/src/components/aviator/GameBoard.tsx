@@ -32,7 +32,7 @@ const GameBoard = ({ bet6 }: { bet6: string[] }) => {
     const pixi_ref = useRef<HTMLDivElement>(null)
     const footer_ref = useRef<HTMLDivElement>(null)
 
-    const [betButtonCount, setBetButtonCount] = useState(2)
+    const [betButtonCount, setBetButtonCount] = useState(window.innerWidth < 1024 ? 1 : 2)
     const [curPayout, setCurPayout] = useState(0)
 
     const [pendingBet, setPendingBet] = useState<boolean[]>([false, false])
@@ -174,7 +174,8 @@ const GameBoard = ({ bet6 }: { bet6: string[] }) => {
     }
     const handleResize = () => {
         const width = Math.min(aviatorState.dimension.width, pixi_ref.current?.clientWidth || 0)
-        const height = Math.max(150, window.innerHeight - (footer_ref.current?.clientHeight || 0) - 150 - (width > 1392 ? 0 : 10))
+        let height = Math.max(150, window.innerHeight - (footer_ref.current?.clientHeight || 0) - 150 - (width > 1392 ? 0 : 10))
+        if (window.innerWidth < 1024) height = Math.max(200, Math.min(height, Math.round(window.innerHeight * 0.4)))
         setPixiDimension({ width, height })
         setAviatorState(prev => {
             const new_width = prev.dimension.width;
@@ -512,20 +513,20 @@ const GameBoard = ({ bet6 }: { bet6: string[] }) => {
                                     }} />
                                     <div className='flex gap-2'>
                                         <div className='flex flex-col w-[100px] lg:w-[130px] 3xl:w-[260px] h-full'>
-                                            <div className='flex justify-between items-center text-[10px] 3xl:text-xl w-full h-[27px] 3xl:h-[54px] bg-black rounded-full px-2' style={{ fontFamily: 'Roboto' }}>
-                                                <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} onClick={() => modifyBetValue(-10, i)} className='flex justify-center items-center w-[16px] h-[16px] 3xl:w-[36px] 3xl:h-[36px]  text-white rounded-full border-2 border-white'>
+                                            <div className='flex justify-between items-center text-[10px] 3xl:text-xl w-full h-[34px] lg:h-[27px] 3xl:h-[54px] bg-black rounded-full px-2' style={{ fontFamily: 'Roboto' }}>
+                                                <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} onClick={() => modifyBetValue(-10, i)} className='flex justify-center items-center w-[22px] h-[22px] lg:w-[16px] lg:h-[16px] 3xl:w-[36px] 3xl:h-[36px]  text-white rounded-full border-2 border-white'>
                                                     <div className='w-2/3 h-1/6 bg-white' />
                                                 </button>
                                                 <input disabled={betPlaceStatus[i] === "success" || pendingBet[i]} onChange={(e) => handleBetValueChange(e, i)} value={betValue[i]} type="string" className='w-[30px] lg:w-[70px] 3xl:w-[150px] bg-black text-center text-[13px] 3xl:text-[26px]' />
-                                                <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} onClick={() => modifyBetValue(10, i)} className='flex relative justify-center items-center w-[16px] h-[16px] 3xl:w-[36px] 3xl:h-[36px] text-white rounded-full border-2 border-white'>
+                                                <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} onClick={() => modifyBetValue(10, i)} className='flex relative justify-center items-center w-[22px] h-[22px] lg:w-[16px] lg:h-[16px] 3xl:w-[36px] 3xl:h-[36px] text-white rounded-full border-2 border-white'>
                                                     <div className='w-2/3 h-1/6 bg-white' />
                                                     <div className='absolute top-[2px] h-2/3 w-1/6 bg-white' />
                                                 </button>
                                             </div>
-                                            <div className='flex flex-wrap justify-between gap-1 w-full h-[40px] 3xl:h-[78px]'>
+                                            <div className='flex flex-wrap justify-between gap-1 w-full h-[60px] lg:h-[40px] 3xl:h-[78px]'>
                                                 {
                                                     bet6.map((item, j) =>
-                                                        <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} key={j} onClick={() => _setBetValue(`${item}`, i)} className='flex justify-center items-center bg-[#171717] rounded-lg gap-[2px] w-[28px] lg:w-[40px] h-[17px] 3xl:w-20 3xl:h-9 text-[13px] 3xl:text-[26px]'>
+                                                        <button disabled={betPlaceStatus[i] === "success" || pendingBet[i]} key={j} onClick={() => _setBetValue(`${item}`, i)} className='flex justify-center items-center bg-[#171717] rounded-lg gap-[2px] w-[30px] lg:w-[40px] h-[26px] lg:h-[17px] 3xl:w-20 3xl:h-9 text-[13px] 3xl:text-[26px]'>
                                                             {item}
                                                         </button>
                                                     )

@@ -12,6 +12,7 @@ import TopLogoBar from '../TopLogoBar'
 import RuleModal from '../RuleDialog'
 import SettingModal from '../SettingModal'
 import HistoryModal from '../HistoryModal'
+import { USE_MOCK, mockAdapter, mockIo } from '../../mock'
 
 const Aviator = () => {
 
@@ -30,15 +31,16 @@ const Aviator = () => {
         Assets.load(urls).then(() => {
             (async () => {
                 const urlParams = new URLSearchParams(window.location.search);
-                const token: string = urlParams.get('token') || "";
+                const token: string = urlParams.get('token') || (USE_MOCK ? 'demo' : "");
                 if (!token) {
                     setAviatorState(prev => ({ ...prev, auth: false }))
                     return
                 }
                 delete axios.defaults.headers.common['Accept']
                 axios.defaults.headers.common['token'] = token;
-                axios.defaults.baseURL = process.env.REACT_APP_API_URL || "https://apiuat.bollygaming.games"
+                axios.defaults.baseURL = process.env.REACT_APP_API_URL || ""
                 axios.defaults.timeout = 20000
+                if (USE_MOCK) axios.defaults.adapter = mockAdapter
                 try {
                     await axios.post('/api/config').then((response) => {
                         localStorage.setItem('bet6', JSON.stringify(response.data.data.config.chips.slice(0, 6).map((item: number) => (`${item}`))))
@@ -57,7 +59,7 @@ const Aviator = () => {
                         client_seed: Math.ceil(Math.random() * 99999999)
                     })
                     Game_Global_Vars.hash = hash
-                    const socket = io(process.env.REACT_APP_SOCKET_URL || "https://aviatoruat.bollygaming.games:3001", {
+                    const socket = USE_MOCK ? mockIo() : io(process.env.REACT_APP_SOCKET_URL as string, {
                         // auth: callback => callback({ token }),
                         auth: { token },
                         transports: ["websocket"]

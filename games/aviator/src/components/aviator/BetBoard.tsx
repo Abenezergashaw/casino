@@ -8,7 +8,7 @@ const BetBoardItem = ({ username, betAmount, crashedAt, cashout }: { username: s
     return (
         <div className={`flex ${crashedAt ? "bg-[#123405] border border-[#427f00]" : "bg-[#141516]"}  rounded-md px-1 items-center cursor-pointer`}>
             <div className='flex items-center w-full gap-1'>
-                <img alt="avatar" width={30} src="/aviator/avatar.png" />
+                <img alt="avatar" width={30} src={`${process.env.PUBLIC_URL}/avatar.png`} />
                 <span>{username}</span>
             </div>
             <div className='flex gap-4 items-center w-full font-bold'>
@@ -26,7 +26,7 @@ const BetBoardTopItem = ({ data }: { data: betBoardTopItemType }) => {
         <div className="flex flex-col w-full rounded-sm">
             <div className="flex w-full items-center bg-[#101112]">
                 <div className='flex flex-col items-center gap-1 pl-4'>
-                    <img alt="avatar" width={30} src="/aviator/avatar.png" />
+                    <img alt="avatar" width={30} src={`${process.env.PUBLIC_URL}/avatar.png`} />
                     <span>{data.username}</span>
                 </div>
                 <div className="flex w-full gap-2 py-4">

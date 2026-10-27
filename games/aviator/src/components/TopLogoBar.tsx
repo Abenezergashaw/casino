@@ -163,7 +163,7 @@ const TopLogoBar = ({ loaded, setSettingModalOpen, setHistoryModalOpen, setRuleM
             {
                 <div className='w-full bg-[#1C1C1C]/70 text-white relative'>
                     <div className='flex justify-between items-center w-full ' ref={header_ref} style={{ padding: w_factor / scale * 0.2 }} >
-                        <img width={w_factor / scale * 5} src={`${process.env.REACT_APP_ASSETS_IMAGE_URL}${webpORpng}/bollygaming-logo.${webpORpng}`} alt="logo" />
+                        <img style={{ height: 34 }} src={`${process.env.REACT_APP_ASSETS_IMAGE_URL}${webpORpng}/aviator-text.${webpORpng}`} alt="Skybound" />
                         <div className='flex ' style={{ gap: w_factor / scale * 0.3 }}>
                             <div className='flex gap-1 sm:gap-2 justify-center items-center' style={{ fontSize: w_factor / scale * 0.5 }}>
                                 <svg className=" overflow-visible sm:scale-[1.2]" width={w_factor / scale * 0.7} height={w_factor / scale * 0.6}><use width={w_factor / scale * 0.7} height={w_factor / scale * 0.6} href="#svg-wallet" /></svg>
@@ -189,8 +189,8 @@ const TopLogoBar = ({ loaded, setSettingModalOpen, setHistoryModalOpen, setRuleM
                             <div className='cursor-pointer self-center' style={{ display: testMobile().iPhone ? "none" : "block" }}>
                                 {
                                     fullScreen ?
-                                        <img onClick={closeFullscreen} width={30} src={`${process.env.REACT_APP_ASSETS_IMAGE_URL}${webpORpng}/fullscreen-close.${webpORpng}`} alt="fullscreen" /> :
-                                        <img onClick={openFullscreen} width={30} src={`${process.env.REACT_APP_ASSETS_IMAGE_URL}${webpORpng}/fullscreen-open.${webpORpng}`} alt="fullscreen" />
+                                        <svg onClick={closeFullscreen} width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" aria-label="exit fullscreen"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg> :
+                                        <svg onClick={openFullscreen} width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" aria-label="fullscreen"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
                                 }
                             </div >
                         </div>

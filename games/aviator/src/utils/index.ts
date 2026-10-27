@@ -127,10 +127,10 @@ export const stopSound = (type: 'bg' | 'flew' | 'win' | 'take') => {
 }
 
 export const loadSound = () => {
-    sound.add('bg-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/bg-sound.mp3`);
-    sound.add('flew-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/flew.mp3`);
-    sound.add('win-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/win.mp3`);
-    sound.add('take-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/take.mp3`);
+    sound.add('bg-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/bg-sound.wav`);
+    sound.add('flew-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/flew.wav`);
+    sound.add('win-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/win.wav`);
+    sound.add('take-sound', `${process.env.REACT_APP_ASSETS_IMAGE_URL}general/sound/take.wav`);
     sound.volumeAll = 0.5
 
 }
@@ -246,4 +246,4 @@ export const getUTCTimefromUTCTime: (timeString: string) => Date = (timeString: 
 }
 export const doDelay = (sec: number) => new Promise((resolve) => setTimeout(resolve, sec))
 export const initBet6 = JSON.parse(localStorage.getItem(`bet6`) || '["100","200","300","400","500","600"]')
-export const webpORpng = utils.isWebGLSupported() ? "webp" : "png"
+export const webpORpng = "png"
