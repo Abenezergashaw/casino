@@ -66,10 +66,16 @@ export class Scene {
   }
 
   // ---- world --------------------------------------------------------------
+  private purge(node: Container) {
+    gsap.killTweensOf(node); gsap.killTweensOf(node.scale); gsap.killTweensOf(node.position);
+    for (const c of node.children) this.purge(c as Container);
+  }
+
   reset(lanes: number, mult: (n: number) => number) {
     this.stopFire();
     this.idleTween?.kill();
-    [this.bg, this.lanesLayer, this.coinsLayer, this.fxLayer].forEach((l) => l.removeChildren().forEach((c) => c.destroy({ children: true })));
+    // cancel every running tween on what is about to be destroyed, or it throws on each frame afterwards
+    [this.bg, this.lanesLayer, this.coinsLayer, this.fxLayer].forEach((l) => { this.purge(l); l.removeChildren().forEach((c) => c.destroy({ children: true })); });
     this.roast = null;
     this.finale = null;
     this.lanes = lanes;
@@ -270,7 +276,7 @@ export class Scene {
       legs.poly([lx - 11, 0, lx + 11, 0, lx + 7, -5, lx - 7, -5]).fill(0xf59e0b);
     }
     // three short tail feathers fanned up and back, mostly hidden behind the body
-    const tail = new Graphics();
+    const tail = new Container();
     for (const [dx, dy, rot, len] of [[-34, -70, -0.35, 20], [-38, -62, -0.75, 18], [-30, -76, 0.0, 17]] as const) {
       const f = new Graphics().ellipse(0, 0, 7, len).fill(rot === 0 ? 0xe9ecf4 : 0xd3d8e6);
       f.position.set(dx, dy); f.rotation = rot; tail.addChild(f);

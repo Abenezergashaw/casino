@@ -52,8 +52,16 @@ async function loadMath(rng: () => number): Promise<{ math: ComplexMath; src: st
 
 async function boot() {
   const stage = $('stage');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // Pixi picks WebGL, then WebGPU, then Canvas2D, so a device or mode without WebGL (iPhone Lockdown Mode,
+  // some in-app browsers) still gets a working game, just a slower one.
   const app = new Application();
-  await app.init({ resizeTo: stage, background: 0x353c55, antialias: true, resolution: Math.min(window.devicePixelRatio || 1, 2), autoDensity: true });
+  try {
+    await app.init({ resizeTo: stage, background: 0x353c55, antialias: true, resolution: dpr, autoDensity: true, preference: 'webgl' });
+  } catch (e) {
+    throw new Error(`This browser could not start graphics (${(e as Error)?.message ?? e}). If Lockdown Mode is on, turn it off for this site.`);
+  }
+  document.documentElement.dataset.renderer = String(app.renderer.name ?? app.renderer.type);
   stage.appendChild(app.canvas);
   // the panel changes height between setup and play; keep the canvas matched to the stage box
   new ResizeObserver(() => app.resize()).observe(stage);
@@ -169,4 +177,8 @@ async function boot() {
   document.documentElement.dataset.ready = '1';
 }
 
-boot().catch((e) => { console.error(e); const t = $('toast'); t.hidden = false; t.textContent = 'Failed to start: ' + (e?.message ?? e); });
+boot().catch((e) => {
+  console.error(e);
+  const t = $('toast'); t.hidden = false; t.className = 'toast lose'; t.style.whiteSpace = 'normal'; t.style.maxWidth = '92%';
+  t.textContent = 'Could not start: ' + (e?.message ?? e);
+});
