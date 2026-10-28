@@ -56,6 +56,11 @@ export class Scene {
   private roast: Container | null = null;
   private finale: { egg: Container; text: Text } | null = null;
   private idleTween: gsap.core.Tween | null = null;
+  private lifeTween: gsap.core.Timeline | null = null;
+  private wing: Container = new Container();
+  private eyes: Container[] = [];
+  private pupils: Graphics[] = [];
+  private beakLower: Graphics = new Graphics();
 
   constructor(private app: Application) {
     this.world.addChild(this.bg, this.lanesLayer, this.coinsLayer, this.chickenLayer, this.fxLayer);
@@ -114,6 +119,7 @@ export class Scene {
     this.body.scale.set(1);
     this.body.y = 0;
     this.chicken.position.set(START_W / 2, CURB);
+    this.startLife();
     this.glow.clear();
     this.glow.alpha = 0;
     this.layout(false);
@@ -268,42 +274,98 @@ export class Scene {
 
   // ---- chicken ------------------------------------------------------------------
   private buildChicken() {
+    // Anatomy taken from enlarged crops of the original game's chicken: one plump white body with the head
+    // merged into it, big tall pale-yellow eyes under a thick black lid (far eye smaller, half behind the
+    // beak), short thick orange beak slightly open, red wattle beside it, red comb swept back on top-left,
+    // a big pressed wing on one side, ruffled tufts on the other, and short stumpy orange legs.
     const b = this.body;
-    const sh = new Graphics().ellipse(0, 1, 36, 7).fill({ color: 0x000000, alpha: 0.32 });
+    const OUT = 0xd5dbec, WHITE = 0xffffff;
+    const shadow = new Graphics().ellipse(0, 1, 40, 7).fill({ color: 0x000000, alpha: 0.32 });
+
     const legs = new Graphics();
-    for (const lx of [-13, 13]) {
-      legs.roundRect(lx - 2.5, -22, 5, 22, 2).fill(0xf59e0b);
-      legs.poly([lx - 11, 0, lx + 11, 0, lx + 7, -5, lx - 7, -5]).fill(0xf59e0b);
+    for (const [x, dir] of [[-17, -1], [17, 1]] as const) {
+      legs.roundRect(x - 4.5, -14, 9, 15, 3).fill(0xf0a31b);
+      legs.ellipse(x + dir * 5, -2, 14, 5).fill(0xf6b72c);
+      legs.poly([x + dir * 14, -3, x + dir * 20, 1, x + dir * 12, 1]).fill(0xf6b72c);
+      legs.ellipse(x + dir * 3, -5, 6, 2).fill({ color: 0xffffff, alpha: 0.25 });
     }
-    // three short tail feathers fanned up and back, mostly hidden behind the body
-    const tail = new Container();
-    for (const [dx, dy, rot, len] of [[-34, -70, -0.35, 20], [-38, -62, -0.75, 18], [-30, -76, 0.0, 17]] as const) {
-      const f = new Graphics().ellipse(0, 0, 7, len).fill(rot === 0 ? 0xe9ecf4 : 0xd3d8e6);
-      f.position.set(dx, dy); f.rotation = rot; tail.addChild(f);
-    }
-    const g = new Graphics();
-    g.ellipse(0, -48, 43, 39).fill(0xdde1ec);                       // body shade
-    g.ellipse(-2, -52, 40, 36).fill(0xf6f8fc);                      // body
-    g.ellipse(-6, -60, 26, 18).fill({ color: 0xffffff, alpha: 0.8 }); // highlight
-    g.ellipse(-16, -46, 22, 16).fill(0xe3e7f2);                     // wing
-    g.moveTo(-32, -44).quadraticCurveTo(-16, -34, 2, -44).stroke({ width: 2, color: 0xc4cadb });
-    g.moveTo(-30, -52).quadraticCurveTo(-16, -43, 0, -52).stroke({ width: 2, color: 0xc4cadb });
-    // head
-    g.circle(24, -84, 25).fill(0xf6f8fc);
-    g.ellipse(32, -64, 6, 9).fill(0xe53944);                         // wattle
-    g.circle(12, -107, 8.5).fill(0xe53944).circle(24, -112, 9.5).fill(0xe53944).circle(36, -107, 8.5).fill(0xe53944);
-    g.circle(24, -103, 14).fill(0xe53944);
-    // beak
-    g.poly([44, -87, 67, -80, 44, -73]).fill(0xf8b52b);
-    g.poly([44, -78, 63, -80, 44, -73]).fill(0xe08e12);
-    // googly eyes
-    for (const ex of [11, 33]) {
-      g.circle(ex, -88, 12).fill(0xffffff).circle(ex, -88, 12).stroke({ width: 2.6, color: 0x23232d });
-      g.circle(ex + 2.5, -87, 5.2).fill(0x14141b).circle(ex + 4, -89, 1.8).fill(0xffffff);
-    }
-    b.addChild(tail, legs, g);
-    this.chicken.addChild(sh, b);
+
+    const body = new Graphics();
+    body.ellipse(0, -44, 48, 38).fill(0xe3e8f5).ellipse(0, -44, 48, 38).stroke({ width: 2, color: OUT });
+    body.ellipse(0, -48, 45, 35).fill(WHITE);
+    body.ellipse(0, -72, 37, 28).fill(WHITE);                           // head merged into the body
+    body.ellipse(-8, -26, 36, 11).fill({ color: 0xe6ebf6, alpha: 0.9 }); // belly shade
+    // ruffled tufts on the far side
+    for (const [x, y, r] of [[45, -52, 8], [48, -41, 8], [44, -30, 7]] as const)
+      body.circle(x, y, r).fill(0xf1f4fb).circle(x, y, r).stroke({ width: 1.6, color: OUT });
+
+    // comb: a red swept-back mass with scalloped top
+    const comb = new Graphics();
+    comb.ellipse(-14, -92, 30, 13).fill(0xd91f1b);
+    for (const [x, y, r] of [[-34, -96, 11], [-22, -106, 13], [-7, -110, 14], [8, -103, 11], [16, -94, 8]] as const) comb.circle(x, y, r).fill(0xe3261f);
+    comb.ellipse(-40, -80, 8, 14).fill(0xd91f1b);                      // tuft falling down the near side of the head
+    comb.ellipse(-20, -112, 10, 5).fill({ color: 0xf2554a, alpha: 0.85 });
+    comb.ellipse(-12, -88, 28, 5).fill({ color: 0xb81612, alpha: 0.5 });
+
+    // wing pressed on the near side
+    const wing = new Container();
+    const wg = new Graphics();
+    wg.ellipse(0, 0, 25, 30).fill(WHITE).ellipse(0, 0, 25, 30).stroke({ width: 2, color: OUT });
+    wg.ellipse(2, 8, 17, 18).fill(0xeef1f9);
+    wg.moveTo(-14, 14).quadraticCurveTo(0, 24, 14, 14).stroke({ width: 1.6, color: OUT });
+    wing.addChild(wg);
+    wing.position.set(-27, -38);
+    wing.rotation = 0.12;
+    this.wing = wing;
+
+    // eyes
+    const mkEye = (x: number, y: number, rx: number, ry: number, rot: number, pupilDx: number) => {
+      const e = new Container();
+      const g = new Graphics();
+      g.ellipse(0, 1.6, rx + 0.8, ry + 0.8).fill(0xef9c9c);              // pink rim, thickest at the bottom
+      g.ellipse(0, 0, rx, ry).fill(0xf9e8a2);                            // pale yellow eyeball
+      g.ellipse(-rx * 0.2, ry * 0.25, rx * 0.55, ry * 0.5).fill({ color: 0xfff7c9, alpha: 0.8 });
+      g.moveTo(-rx - 1, -ry * 0.2).quadraticCurveTo(0, -ry * 1.5, rx + 1, -ry * 0.2).stroke({ width: 3.4, color: 0x1b1b24, cap: 'round' }); // thick upper lid
+      e.addChild(g);
+      const pupil = new Graphics().ellipse(0, 0, rx * 0.3, ry * 0.3).fill(0x4a2e12);
+      pupil.position.set(pupilDx, -ry * 0.42);
+      e.addChild(pupil);
+      e.position.set(x, y); e.rotation = rot;
+      return { e, pupil };
+    };
+    const left = mkEye(-14, -63, 18, 23, 0, 1);
+    const right = mkEye(28, -70, 11, 15, 0.28, 0);
+    this.eyes = [left.e, right.e];
+    this.pupils = [left.pupil, right.pupil];
+
+    // beak, slightly open, with wattle
+    const beak = new Container();
+    const lower = new Graphics().ellipse(4, 12, 13, 7).fill(0xe38d17);
+    const mouth = new Graphics().ellipse(4, 5, 11, 7).fill(0x3a1812);
+    const upper = new Graphics();
+    upper.ellipse(0, -2, 20, 14).fill(0xf8b92b).ellipse(0, -2, 20, 14).stroke({ width: 1.6, color: 0xd9860f });
+    upper.ellipse(-3, -6, 9, 5).fill({ color: 0xfdd664, alpha: 0.9 });
+    beak.addChild(lower, mouth, upper);
+    beak.position.set(15, -47);
+    beak.rotation = -0.12;
+    this.beakLower = lower;
+    const wattle = new Graphics().ellipse(0, 0, 5.5, 9).fill(0xe9465f);
+    wattle.position.set(-3, -33); wattle.rotation = 0.35;
+
+    b.addChild(legs, body, comb, wing, wattle, left.e, right.e, beak);
+    this.chicken.addChild(shadow, b);
     this.chicken.visible = false;
+  }
+
+  /** Blink now and then, and let the pupils drift, so the chicken looks alive. */
+  private startLife() {
+    this.lifeTween?.kill();
+    const tl = gsap.timeline({ repeat: -1, repeatDelay: 1.6 });
+    tl.to(this.eyes.map((e) => e.scale), { y: 0.08, duration: 0.07, yoyo: true, repeat: 1 })
+      .to(this.pupils, { x: (i: number) => (i ? 0 : 1) + 2.5, duration: 0.25 }, '+=0.8')
+      .to(this.pupils, { x: (i: number) => (i ? 0 : 1) - 2, duration: 0.3 }, '+=0.9')
+      .to(this.pupils, { x: (i: number) => (i ? 0 : 1), duration: 0.25 }, '+=0.5');
+    this.lifeTween = tl;
   }
 
   // ---- states ---------------------------------------------------------------------
@@ -345,7 +407,10 @@ export class Scene {
     return new Promise<void>((done) => {
       const tl = gsap.timeline({ onComplete: done });
       const dx = x - this.chicken.x;
-      tl.to(this.body.scale, { x: 1.12, y: 0.84, duration: 0.09, ease: 'power1.out' })
+      tl.to(this.wing, { rotation: -0.55, duration: 0.2, ease: 'power2.out' }, 0.1)
+        .to(this.wing, { rotation: 0.12, duration: 0.25, ease: 'power2.in' }, 0.35)
+        .to(this.beakLower, { y: 3, duration: 0.15, yoyo: true, repeat: 1 }, 0.1)
+        .to(this.body.scale, { x: 1.12, y: 0.84, duration: 0.09, ease: 'power1.out' }, 0)
         .to(this.body.scale, { x: 0.92, y: 1.12, duration: 0.12 })
         .to(this.chicken, { x: this.chicken.x + dx * 0.5, duration: 0.2, ease: 'sine.out' }, '<')
         .to(this.body, { y: -58, duration: 0.2, ease: 'power2.out' }, '<')
