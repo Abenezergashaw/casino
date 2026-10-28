@@ -1,276 +1,482 @@
-// Visual layer only. It never decides an outcome: main.ts asks the math (open-rgs Lua) what happened and
-// calls hop / bust / celebrate here to show it. Top-down road, lanes are vertical strips, the chicken
-// crosses left to right and the camera follows.
+// Visual layer only: it never decides an outcome. main.ts asks the math what happened and calls hopSafe /
+// hopBust / celebrate here to show it.
+//
+// Design reference: the original Chicken Road ("burning tiles") by InOut Games, measured from public
+// screenshots: flat side-on view, indigo brick wall, dashed lane dividers, a steel manhole coin per lane
+// carrying the multiplier, a barred arch under each, a doorway at the start and a golden egg at the finish.
+// Coin states: steel (ahead), green (chicken is here), gold (passed), red with flame (hit). The hazard is
+// fire from the grate, which leaves a roast chicken on a plate. All artwork here is drawn in code.
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 import gsap from 'gsap';
 
-const H = 520;            // design height of the road
-const LW = 112;           // lane width
-const SIDE = 170;         // start / finish pavement width
-const CAR_COLORS = [0xe8453c, 0x3b82f6, 0xf5b324, 0x22b07d, 0x8b5cf6, 0xf97316, 0xe5e7eb];
+export const H = 324;          // design height; the road band ends here
+const LW = 124;                // lane width
+const START_W = 150;           // doorway wall
+const END_W = 230;             // egg arch
+const CURB = 300;              // y where the chicken's feet rest
+const COIN_Y = 116, COIN_R = 42;
 
-const labelStyle = (size: number, fill = 0xffffff) =>
-  new TextStyle({ fontFamily: 'Roboto, system-ui, sans-serif', fontSize: size, fontWeight: '900', fill, stroke: { color: 0x14161a, width: Math.max(3, size / 7) } });
+const C = {
+  wall: 0x353c55, wallStart: 0x2c314a, patch: 0x2b3150, patch2: 0x30365a, divider: 0x9fa5c5,
+  steel: 0x474f8e, steelHi: 0x5a63a8, steelRim: 0x2f3560, steelRing: 0x7a82c4,
+  green: 0x2da554, greenHi: 0x43d866, greenRim: 0x176d35,
+  gold: 0xecbf41, goldHi: 0xf7d96a, goldRim: 0xb98a1c, goldEmboss: 0xc38d1e,
+  red: 0xe5546a, redHi: 0xf59aa0, redRim: 0x9b2a44,
+  grate: 0x20263b, grateBar: 0x3d456b, grateBase: 0x65678f,
+  curb: 0x383a4c, road: 0x3b3c4e, slab: 0x434659, dark: 0x151921,
+};
 
-interface Car { g: Graphics; dir: 1 | -1; speed: number; laneIdx: number }
+type CoinState = 'steel' | 'green' | 'gold' | 'red';
+
+const font = 'Montserrat, system-ui, -apple-system, sans-serif';
+const multStyle = (size: number, fill = 0xc9cff0) =>
+  new TextStyle({ fontFamily: font, fontSize: size, fontWeight: '800', fill, stroke: { color: 0x20264a, width: Math.max(2, size / 9) }, dropShadow: { color: 0x14183a, alpha: 0.5, distance: 2, angle: Math.PI / 2, blur: 0 } });
+
+/** Small deterministic PRNG so the wall looks the same every round. */
+const prng = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+
+interface Coin { box: Container; g: Graphics; label: Text; icon: Graphics; state: CoinState; x: number }
 
 export class Scene {
   private world = new Container();
-  private road = new Container();
-  private tags: Container[] = [];
-  private cars: Car[] = [];
-  private laneMul: number[] = [];
+  private bg = new Container();
+  private lanesLayer = new Container();
+  private coinsLayer = new Container();
+  private chickenLayer = new Container();
+  private fxLayer = new Container();
   private chicken = new Container();
-  private chickenBody = new Container();
-  private fx = new Container();
+  private body = new Container();
+  private glow = new Graphics();
+  private coins: Coin[] = [];
+  private laneMul: number[] = [];
   private lanes = 0;
   private lane = 0;
   private scale = 1;
+  private fires: gsap.core.Tween[] = [];
+  private roast: Container | null = null;
+  private finale: { egg: Container; text: Text } | null = null;
+  private idleTween: gsap.core.Tween | null = null;
 
   constructor(private app: Application) {
-    this.world.addChild(this.road, this.chicken, this.fx);
+    this.world.addChild(this.bg, this.lanesLayer, this.coinsLayer, this.chickenLayer, this.fxLayer);
     app.stage.addChild(this.world);
     this.buildChicken();
-    app.ticker.add((t) => this.tick(t.deltaTime));
+    this.chickenLayer.addChild(this.glow, this.chicken);
     app.renderer.on('resize', () => this.layout(false));
   }
 
-  // ---- world ------------------------------------------------------------
-  /** Rebuild the road for a new round. `mult(n)` is only used to print the lane tags. */
+  // ---- world --------------------------------------------------------------
   reset(lanes: number, mult: (n: number) => number) {
+    this.stopFire();
+    this.idleTween?.kill();
+    [this.bg, this.lanesLayer, this.coinsLayer, this.fxLayer].forEach((l) => l.removeChildren().forEach((c) => c.destroy({ children: true })));
+    this.roast = null;
+    this.finale = null;
     this.lanes = lanes;
     this.lane = 0;
-    this.road.removeChildren().forEach((c) => c.destroy({ children: true }));
-    this.tags = [];
-    this.cars = [];
+    this.coins = [];
     this.laneMul = Array.from({ length: lanes + 1 }, (_, i) => (i === 0 ? 1 : mult(i)));
-    const W = SIDE * 2 + lanes * LW;
+    const W = START_W + lanes * LW + END_W;
+    const rnd = prng(7);
 
-    const ground = new Graphics().rect(-400, -200, W + 800, H + 400).fill(0x1d2a22);
-    this.road.addChild(ground);
-    this.pavement(0, SIDE, true);
-    this.pavement(SIDE + lanes * LW, SIDE, false);
+    // wall: runs far above the road so a tall phone stage is still filled
+    const wall = new Graphics().rect(-600, -1400, W + 1200, 1400 + H).fill(C.wall);
+    wall.rect(-600, -1400, 600 + START_W, 1400 + H).fill(C.wallStart);
+    this.bg.addChild(wall);
 
-    for (let i = 1; i <= lanes; i++) {
-      const x = SIDE + (i - 1) * LW;
-      const lane = new Graphics().rect(x, 0, LW, H).fill(i % 2 ? 0x2b2e35 : 0x30343c);
-      // dashed lane edge
-      for (let y = 8; y < H; y += 44) lane.rect(x - 2, y, 4, 24).fill({ color: 0xe5e7eb, alpha: 0.55 });
-      this.road.addChild(lane);
+    // soft darker bricks scattered like the reference
+    const patches = new Graphics();
+    for (let i = 0; i < Math.ceil(W / 60) * 4; i++) {
+      const x = (i % Math.ceil(W / 60)) * 60 + rnd() * 30 - 10, y = -320 + rnd() * 460, w = 30 + rnd() * 30, h = 18 + rnd() * 14;
+      patches.roundRect(x, y, w, h, 4).fill({ color: rnd() > 0.5 ? C.patch : C.patch2, alpha: 0.9 });
     }
-    // tags after every lane is drawn (so a neighbouring lane never covers them), cars on top of the tags
-    for (let i = 1; i <= lanes; i++) this.addTag(i, this.laneX(i));
-    for (let i = 1; i <= lanes; i++) for (let k = 0; k < 2; k++) this.addCar(i, SIDE + (i - 1) * LW + LW / 2, k);
-    // finish line
-    const fin = new Graphics();
-    for (let y = 0; y < H; y += 26) for (let c = 0; c < 2; c++) fin.rect(SIDE + lanes * LW + c * 13, y, 13, 26).fill((y / 26 + c) % 2 ? 0xf8fafc : 0x111418);
-    this.road.addChild(fin);
+    for (let i = 0; i < lanes; i++) {
+      const x = START_W + i * LW + 12 + rnd() * 30;
+      patches.roundRect(x, 188 + rnd() * 14, 34 + rnd() * 14, 20, 4).fill({ color: C.patch, alpha: 0.9 });
+    }
+    this.bg.addChild(patches);
 
-    this.chicken.alpha = 1;
-    this.chicken.scale.set(0.82);
-    this.chicken.position.set(this.laneX(0), H / 2);
+    this.doorway();
+    for (let i = 1; i <= lanes; i++) this.laneColumn(i);
+    this.finish(START_W + lanes * LW);
+    this.road(W);
+
     this.chicken.visible = true;
-    this.chickenBody.rotation = 0;
-    this.chickenBody.scale.set(1);
-    this.chickenBody.alpha = 1;
-    this.fx.removeChildren();
+    this.chicken.alpha = 1;
+    this.chicken.rotation = 0;
+    this.chicken.scale.set(0.92);
+    this.body.scale.set(1);
+    this.body.y = 0;
+    this.chicken.position.set(START_W / 2, CURB);
+    this.glow.clear();
+    this.glow.alpha = 0;
     this.layout(false);
   }
 
-  private pavement(x: number, w: number, start: boolean) {
-    const g = new Graphics().rect(x, 0, w, H).fill(0x8a8f98);
-    for (let y = 0; y < H; y += 52) for (let c = 0; c < Math.ceil(w / 52); c++)
-      g.rect(x + c * 52 + 2, y + 2, 48, 48).fill({ color: (y / 52 + c) % 2 ? 0x9a9fa8 : 0x858a93, alpha: 1 });
-    this.road.addChild(g);
-    const sign = new Text({ text: start ? 'START' : 'SAFE', style: labelStyle(26, 0xfde68a) });
-    sign.anchor.set(0.5);
-    sign.position.set(x + w / 2, 44);
-    this.road.addChild(sign);
-  }
-
-  private addTag(i: number, x: number) {
-    const c = new Container();
-    c.position.set(x, H / 2 + 74);
-    const base = new Graphics().circle(0, 0, 34).fill(0x15171c).circle(0, 0, 34).stroke({ width: 4, color: 0x4b5160 }).circle(0, 0, 25).stroke({ width: 2, color: 0x2e323c });
-    const t = new Text({ text: `${this.laneMul[i].toFixed(2)}x`, style: labelStyle(this.laneMul[i] >= 100 ? 15 : 18, 0xfbbf24) });
-    t.anchor.set(0.5);
-    c.addChild(base, t);
-    c.label = 'tag';
-    this.road.addChild(c);
-    this.tags[i] = c;
-  }
-
-  private addCar(laneIdx: number, cx: number, k: number) {
-    const color = CAR_COLORS[(laneIdx * 3 + k * 2) % CAR_COLORS.length];
-    const g = this.carGraphic(color);
-    const dir: 1 | -1 = laneIdx % 2 ? 1 : -1;
-    g.position.set(cx, ((laneIdx * 83 + k * (H + 240) / 2) % (H + 240)) - 120);
-    this.road.addChild(g);
-    this.cars.push({ g, dir, speed: 2.1 + ((laneIdx * 7) % 9) * 0.28, laneIdx });
-  }
-
-  private carGraphic(color: number) {
+  private doorway() {
     const g = new Graphics();
-    g.roundRect(-26, -50, 52, 100, 11).fill(color);
-    g.roundRect(-20, -30, 40, 20, 5).fill(0x1b2a3a);          // windshield
-    g.roundRect(-20, 14, 40, 16, 5).fill(0x1b2a3a);           // rear window
-    g.rect(-24, -48, 10, 5).fill(0xfff4c2).rect(14, -48, 10, 5).fill(0xfff4c2); // lights
-    g.roundRect(-26, -50, 52, 100, 11).stroke({ width: 2, color: 0x000000, alpha: 0.35 });
-    return g;
+    const cx = START_W / 2, w = 74;
+    g.roundRect(cx - w / 2 - 6, 118, w + 12, CURB - 118 + 2, 36).fill(0x23283f);
+    g.roundRect(cx - w / 2, 126, w, CURB - 126 + 2, 32).fill(C.dark);
+    g.rect(cx - w / 2 - 6, CURB - 12, w + 12, 14).fill(C.dark);
+    // stone courses on the start wall
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 2; c++) g.roundRect(8 + c * 74 + (r % 2) * 22, 20 + r * 20, 56, 12, 3).fill({ color: 0x252a42, alpha: 0.9 });
+    this.lanesLayer.addChild(g);
   }
 
-  private buildChicken() {
-    const b = this.chickenBody;
+  private laneColumn(i: number) {
+    const x0 = START_W + (i - 1) * LW, cx = x0 + LW / 2;
     const g = new Graphics();
-    g.ellipse(0, 6, 30, 24).fill(0xffffff);                              // body
-    g.ellipse(-8, 8, 16, 12).fill(0xf1f5f9);                             // wing
-    g.circle(24, -12, 15).fill(0xffffff);                                // head
-    g.poly([37, -14, 52, -9, 37, -4]).fill(0xf59e0b);                    // beak
-    g.circle(28, -16, 3.2).fill(0x111418);                               // eye
-    g.circle(18, -28, 6).fill(0xe11d48).circle(26, -30, 6).fill(0xe11d48); // comb
-    g.poly([-30, 4, -46, -4, -40, 12]).fill(0xe2e8f0);                   // tail
-    g.rect(-6, 28, 4, 12).fill(0xf59e0b).rect(8, 28, 4, 12).fill(0xf59e0b); // legs
-    b.addChild(g);
-    this.chicken.addChild(new Graphics().ellipse(0, 34, 30, 9).fill({ color: 0x000000, alpha: 0.28 }), b);
-    this.chicken.visible = false;
+    // dashed divider on the left edge
+    for (let y = -1400; y < CURB; y += 36) g.roundRect(x0 - 2, y, 4, 22, 2).fill({ color: C.divider, alpha: 0.95 });
+    // sewer arch with bars
+    const gx = cx - 31, gy = 244, gw = 62, gh = 56;
+    g.roundRect(gx, gy, gw, gh + 4, 24).fill(C.grate);
+    g.rect(gx, gy + 30, gw, gh - 26).fill(C.grate);
+    for (let b = 0; b < 7; b++) g.roundRect(gx + 8 + b * 7.4, gy + 14, 3.2, gh - 12, 1.5).fill(C.grateBar);
+    g.roundRect(gx - 6, CURB - 6, gw + 12, 8, 3).fill(C.grateBase);
+    this.lanesLayer.addChild(g);
+
+    const box = new Container();
+    box.position.set(cx, COIN_Y);
+    const cg = new Graphics(), icon = new Graphics();
+    const label = new Text({ text: `${this.laneMul[i].toFixed(2)}x`, style: multStyle(this.laneMul[i] >= 1000 ? 17 : this.laneMul[i] >= 100 ? 20 : 23) });
+    label.anchor.set(0.5);
+    box.addChild(cg, icon, label);
+    this.coinsLayer.addChild(box);
+    const coin: Coin = { box, g: cg, label, icon, state: 'steel', x: cx };
+    this.coins[i] = coin;
+    this.paintCoin(coin, 'steel');
   }
 
-  // ---- camera -----------------------------------------------------------
-  /** Where the chicken stands after crossing `i` lanes: start pavement, a lane divider, or the finish pavement. */
-  private laneX(i: number) {
-    if (i <= 0) return SIDE / 2;
-    if (i >= this.lanes) return SIDE + this.lanes * LW + SIDE / 2;
-    return SIDE + i * LW;
+  private paintCoin(c: Coin, state: CoinState) {
+    c.state = state;
+    const g = c.g, R = COIN_R;
+    const pal = {
+      steel: [C.steelRim, C.steel, C.steelHi, C.steelRing],
+      green: [C.greenRim, C.green, C.greenHi, 0x7be89b],
+      gold: [C.goldRim, C.gold, C.goldHi, 0xfff0a8],
+      red: [C.redRim, C.red, C.redHi, 0xffc2c6],
+    }[state];
+    g.clear();
+    g.circle(0, 3, R + 4).fill({ color: 0x000000, alpha: 0.28 });            // drop shadow
+    g.circle(0, 0, R + 3).fill(pal[0]);                                        // outer rim
+    g.circle(0, 0, R).fill(pal[1]);                                            // body
+    g.circle(0, -R * 0.28, R * 0.78).fill({ color: pal[2], alpha: 0.45 });     // upper sheen
+    g.circle(0, 0, R * 0.8).stroke({ width: 3, color: pal[3], alpha: 0.55 });   // inner ring
+    // notches on the rim like a manhole cover
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      g.circle(Math.cos(a) * (R - 2), Math.sin(a) * (R - 2), 2.4).fill({ color: pal[0], alpha: 0.7 });
+    }
+    c.icon.clear();
+    c.label.visible = state === 'steel' || state === 'green';
+    if (state === 'green') { c.label.style.fill = 0xffffff; c.label.style.stroke = { color: 0x0d4a22, width: 3 }; }
+    if (state === 'steel') { c.label.style.fill = 0xc9cff0; c.label.style.stroke = { color: 0x20264a, width: 3 }; }
+    if (state === 'gold') this.roastEmblem(c.icon);
+    if (state === 'red') this.flameEmblem(c.icon);
   }
-  /** Centre line of lane `k` (1-based), where its cars drive. */
-  private laneCenter(k: number) { return SIDE + (k - 1) * LW + LW / 2; }
+
+  /** Embossed roast-chicken glyph on a passed (gold) coin. */
+  private roastEmblem(g: Graphics) {
+    const e = C.goldEmboss;
+    g.ellipse(2, 3, 19, 14).fill(e);
+    g.ellipse(-8, -6, 8, 6).fill(e);                          // drumstick knuckle
+    g.roundRect(-24, -10, 12, 6, 3).fill(e);
+    g.circle(-6, 4, 2.2).fill(C.gold).circle(8, 4, 2.2).fill(C.gold);
+    g.moveTo(-9, 1).lineTo(-3, 7).stroke({ width: 1.6, color: C.gold });
+    g.moveTo(-3, 1).lineTo(-9, 7).stroke({ width: 1.6, color: C.gold });
+    g.moveTo(5, 1).lineTo(11, 7).stroke({ width: 1.6, color: C.gold });
+    g.moveTo(11, 1).lineTo(5, 7).stroke({ width: 1.6, color: C.gold });
+  }
+
+  private flameEmblem(g: Graphics) {
+    this.flamePath(g, 0, 22, 17, 40).fill(0xff7a1f);
+    this.flamePath(g, 0, 22, 10, 26).fill(0xffd23f);
+    g.circle(-2, 8, 5).fill({ color: 0xfff3b0, alpha: 0.9 });
+  }
+
+  /** Teardrop flame with its tip at (x, y - h). */
+  private flamePath(g: Graphics, x: number, y: number, w: number, h: number) {
+    return g.moveTo(x, y)
+      .bezierCurveTo(x - w * 1.25, y - h * 0.18, x - w * 0.9, y - h * 0.62, x - w * 0.08, y - h)
+      .bezierCurveTo(x + w * 0.02, y - h * 0.62, x + w * 0.34, y - h * 0.5, x + w * 0.5, y - h * 0.62)
+      .bezierCurveTo(x + w * 1.25, y - h * 0.42, x + w * 1.1, y - h * 0.1, x, y);
+  }
+
+  private finish(x0: number) {
+    const cx = x0 + END_W / 2;
+    const g = new Graphics();
+    g.rect(x0, -1400, END_W + 600, 1400 + CURB).fill(0x30365a);
+    for (let r = 0; r < 12; r++) for (let c = 0; c < 4; c++) g.roundRect(x0 + 12 + c * 54 + (r % 2) * 26, 10 + r * 24, 46, 14, 3).fill({ color: 0x2a3050, alpha: 0.9 });
+    // arch + light cone
+    g.roundRect(cx - 48, 70, 96, CURB - 68, 48).fill(0x1d2238);
+    g.poly([cx - 16, 130, cx + 16, 130, cx + 46, CURB, cx - 46, CURB]).fill({ color: 0xf6d777, alpha: 0.24 });
+    g.ellipse(cx, CURB - 8, 22, 6).fill(0xd9d6c8).roundRect(cx - 14, CURB - 26, 28, 18, 4).fill(0xe8e5d9);
+    this.lanesLayer.addChild(g);
+
+    const egg = new Container();
+    egg.position.set(cx, 170);
+    const eg = new Graphics();
+    eg.moveTo(0, -42).bezierCurveTo(30, -42, 36, 8, 0, 26).bezierCurveTo(-36, 8, -30, -42, 0, -42).fill(0xf5c518);
+    eg.ellipse(-10, -16, 8, 14).fill({ color: 0xfff3a8, alpha: 0.75 });
+    eg.moveTo(0, -42).bezierCurveTo(30, -42, 36, 8, 0, 26).bezierCurveTo(-36, 8, -30, -42, 0, -42).stroke({ width: 3, color: 0xc7860b, alpha: 0.7 });
+    const text = new Text({ text: `${this.laneMul[this.lanes].toFixed(2)}x`, style: new TextStyle({ fontFamily: font, fontSize: 21, fontWeight: '800', fill: 0xfff3a8, stroke: { color: 0x6b4300, width: 4 } }) });
+    text.anchor.set(0.5);
+    text.y = -6;
+    egg.addChild(eg, text);
+    this.coinsLayer.addChild(egg);
+    this.finale = { egg, text };
+  }
+
+  private road(W: number) {
+    const g = new Graphics();
+    g.rect(-600, CURB, W + 1200, 3).fill(C.curb);
+    g.rect(-600, CURB + 3, W + 1200, H - CURB - 3).fill(C.road);
+    for (let i = 0; i < this.lanes + 2; i++) {
+      const x = i === 0 ? 0 : START_W + (i - 1) * LW;
+      g.roundRect(x + 3, CURB + 6, (i === 0 ? START_W : LW) - 6, H - CURB - 9, 3).fill({ color: C.slab, alpha: 0.9 });
+    }
+    this.lanesLayer.addChild(g);
+  }
+
+  // ---- camera ---------------------------------------------------------------
+  private posX(i: number) {
+    if (i <= 0) return START_W / 2;
+    return START_W + (i - 1) * LW + LW / 2;
+  }
 
   private layout(animate: boolean) {
     const { width, height } = this.app.screen;
-    this.scale = height / H;
+    // show about three lanes on a phone, more on a wide stage; never smaller than the road's own height
+    this.scale = Math.min(height / H, width / (LW * 3.1));
     this.world.scale.set(this.scale);
-    const target = width * 0.3 - this.laneX(this.lane) * this.scale;
-    const maxX = 0, minX = Math.min(0, width - (SIDE * 2 + this.lanes * LW) * this.scale);
-    const x = Math.max(minX, Math.min(maxX, target));
-    if (animate) gsap.to(this.world, { x, duration: 0.45, ease: 'power2.out' });
+    this.world.y = height - H * this.scale;
+    const W = START_W + this.lanes * LW + END_W;
+    const target = width * 0.36 - this.posX(this.lane) * this.scale;
+    const minX = Math.min(0, width - W * this.scale);
+    const x = Math.max(minX, Math.min(0, target));
+    if (animate) gsap.to(this.world, { x, duration: 0.5, ease: 'power2.out' });
     else { gsap.killTweensOf(this.world); this.world.x = x; }
   }
 
-  private tick(dt: number) {
-    for (const c of this.cars) {
-      const slow = (c.g as any).slow ?? 1;
-      c.g.y += c.dir * c.speed * dt * 2 * slow;
-      if (c.dir === 1 && c.g.y > H + 120) c.g.y = -120;
-      if (c.dir === -1 && c.g.y < -120) c.g.y = H + 120;
-      c.g.rotation = c.dir === 1 ? Math.PI : 0;
+  // ---- chicken ------------------------------------------------------------------
+  private buildChicken() {
+    const b = this.body;
+    const sh = new Graphics().ellipse(0, 1, 36, 7).fill({ color: 0x000000, alpha: 0.32 });
+    const legs = new Graphics();
+    for (const lx of [-13, 13]) {
+      legs.roundRect(lx - 2.5, -22, 5, 22, 2).fill(0xf59e0b);
+      legs.poly([lx - 11, 0, lx + 11, 0, lx + 7, -5, lx - 7, -5]).fill(0xf59e0b);
     }
+    // three short tail feathers fanned up and back, mostly hidden behind the body
+    const tail = new Graphics();
+    for (const [dx, dy, rot, len] of [[-34, -70, -0.35, 20], [-38, -62, -0.75, 18], [-30, -76, 0.0, 17]] as const) {
+      const f = new Graphics().ellipse(0, 0, 7, len).fill(rot === 0 ? 0xe9ecf4 : 0xd3d8e6);
+      f.position.set(dx, dy); f.rotation = rot; tail.addChild(f);
+    }
+    const g = new Graphics();
+    g.ellipse(0, -48, 43, 39).fill(0xdde1ec);                       // body shade
+    g.ellipse(-2, -52, 40, 36).fill(0xf6f8fc);                      // body
+    g.ellipse(-6, -60, 26, 18).fill({ color: 0xffffff, alpha: 0.8 }); // highlight
+    g.ellipse(-16, -46, 22, 16).fill(0xe3e7f2);                     // wing
+    g.moveTo(-32, -44).quadraticCurveTo(-16, -34, 2, -44).stroke({ width: 2, color: 0xc4cadb });
+    g.moveTo(-30, -52).quadraticCurveTo(-16, -43, 0, -52).stroke({ width: 2, color: 0xc4cadb });
+    // head
+    g.circle(24, -84, 25).fill(0xf6f8fc);
+    g.ellipse(32, -64, 6, 9).fill(0xe53944);                         // wattle
+    g.circle(12, -107, 8.5).fill(0xe53944).circle(24, -112, 9.5).fill(0xe53944).circle(36, -107, 8.5).fill(0xe53944);
+    g.circle(24, -103, 14).fill(0xe53944);
+    // beak
+    g.poly([44, -87, 67, -80, 44, -73]).fill(0xf8b52b);
+    g.poly([44, -78, 63, -80, 44, -73]).fill(0xe08e12);
+    // googly eyes
+    for (const ex of [11, 33]) {
+      g.circle(ex, -88, 12).fill(0xffffff).circle(ex, -88, 12).stroke({ width: 2.6, color: 0x23232d });
+      g.circle(ex + 2.5, -87, 5.2).fill(0x14141b).circle(ex + 4, -89, 1.8).fill(0xffffff);
+    }
+    b.addChild(tail, legs, g);
+    this.chicken.addChild(sh, b);
+    this.chicken.visible = false;
   }
 
-  // ---- actions ----------------------------------------------------------
-  /** Chicken waits for a gap, hops to the next lane, tag lights up. */
+  // ---- states ---------------------------------------------------------------------
+  private setCurrent(lane: number) {
+    for (let i = 1; i < this.coins.length; i++) {
+      const c = this.coins[i];
+      const want: CoinState = i < lane ? 'gold' : i === lane ? 'green' : 'steel';
+      if (c.state !== want && c.state !== 'red') this.paintCoin(c, want);
+    }
+    this.drawGlow(lane);
+  }
+
+  private drawGlow(lane: number) {
+    this.glow.clear();
+    if (lane < 1) { this.glow.alpha = 0; return; }
+    const x0 = START_W + (lane - 1) * LW;
+    this.glow.roundRect(x0 + 4, 206, LW - 8, CURB - 206, 6).fill({ color: 0xffe9a0, alpha: 0.1 });
+    this.glow.alpha = 0;
+    gsap.to(this.glow, { alpha: 1, duration: 0.35 });
+  }
+
+  idle(on: boolean) {
+    this.idleTween?.kill();
+    this.body.y = 0;
+    if (on && this.chicken.visible) this.idleTween = gsap.to(this.body, { y: -4, duration: 0.7, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+  }
+
+  // ---- actions --------------------------------------------------------------------
+  /** The chicken hops into the next lane and its coin turns green; the one behind turns gold. */
   async hopSafe(lane: number) {
-    const laneCars = this.cars.filter((c) => c.laneIdx === lane);
-    await Promise.all(laneCars.map((c) => gsap.to(c.g as any, { slow: 0.12, duration: 0.25 })));
-    await this.hop(this.laneX(lane));
+    await this.hop(this.posX(lane));
     this.lane = lane;
+    this.setCurrent(lane);
     this.layout(true);
-    this.lightTag(lane);
-    laneCars.forEach((c) => gsap.to(c.g as any, { slow: 1, duration: 0.9, delay: 0.2 }));
+    this.pulseCoin(lane);
   }
 
   private hop(x: number) {
     return new Promise<void>((done) => {
       const tl = gsap.timeline({ onComplete: done });
-      tl.to(this.chickenBody.scale, { x: 1.12, y: 0.86, duration: 0.07 })
-        .to(this.chickenBody.scale, { x: 0.94, y: 1.1, duration: 0.1 })
-        .to(this.chicken, { x, duration: 0.34, ease: 'power1.inOut' }, '<')
-        .to(this.chickenBody, { y: -46, duration: 0.17, ease: 'power2.out' }, '<')
-        .to(this.chickenBody, { y: 0, duration: 0.17, ease: 'power2.in' })
-        .to(this.chickenBody.scale, { x: 1.14, y: 0.84, duration: 0.06 })
-        .to(this.chickenBody.scale, { x: 1, y: 1, duration: 0.12, ease: 'back.out(3)' });
+      const dx = x - this.chicken.x;
+      tl.to(this.body.scale, { x: 1.12, y: 0.84, duration: 0.09, ease: 'power1.out' })
+        .to(this.body.scale, { x: 0.92, y: 1.12, duration: 0.12 })
+        .to(this.chicken, { x: this.chicken.x + dx * 0.5, duration: 0.2, ease: 'sine.out' }, '<')
+        .to(this.body, { y: -58, duration: 0.2, ease: 'power2.out' }, '<')
+        .to(this.body, { rotation: 0.12, duration: 0.2 }, '<')
+        .to(this.chicken, { x, duration: 0.2, ease: 'sine.in' })
+        .to(this.body, { y: 0, rotation: 0, duration: 0.2, ease: 'power2.in' }, '<')
+        .to(this.body.scale, { x: 1.16, y: 0.8, duration: 0.07 })
+        .call(() => this.dust(x))
+        .to(this.body.scale, { x: 1, y: 1, duration: 0.18, ease: 'back.out(3)' });
     });
   }
 
-  private lightTag(lane: number) {
-    const tag = this.tags[lane];
-    if (!tag) return;
-    const glow = new Graphics().circle(0, 0, 42).fill({ color: 0x22c55e, alpha: 0.45 });
-    tag.addChildAt(glow, 0);
-    gsap.fromTo(glow.scale, { x: 0.6, y: 0.6 }, { x: 1.5, y: 1.5, duration: 0.5 });
-    gsap.to(glow, { alpha: 0, duration: 0.5, onComplete: () => glow.destroy() });
-  }
-
-  /** Chicken steps into the lane and a car from off-screen hits it. */
-  async hopBust(lane: number) {
-    const x = this.laneCenter(lane);
-    const laneCars = this.cars.filter((c) => c.laneIdx === lane);
-    await this.halfHop(x - 40);
-    const hit = this.carGraphic(0xdc2626);
-    const dir = lane % 2 ? 1 : -1;
-    hit.position.set(x, dir === 1 ? -160 : H + 160);
-    hit.rotation = dir === 1 ? Math.PI : 0;
-    this.road.addChild(hit);
-    laneCars.forEach((c) => gsap.to(c.g as any, { slow: 0, duration: 0.2 }));
-    this.lane = lane - 1;
-    this.layout(true);
-    await gsap.to(this.chicken, { x, duration: 0.12 });
-    await gsap.to(hit, { y: H / 2 + 6, duration: 0.42, ease: 'power2.in' });
-    this.feathers(x, H / 2);
-    this.shake();
-    gsap.to(this.chickenBody, { rotation: 1.9, alpha: 0.0, duration: 0.5, ease: 'power2.out' });
-    gsap.to(this.chicken, { x: x + 90 * dir, y: H / 2 + 120 * dir, alpha: 0, duration: 0.5, ease: 'power2.out' });
-    await gsap.to(hit, { y: dir === 1 ? H + 220 : -220, duration: 0.7, ease: 'power1.in' });
-    hit.destroy();
-    laneCars.forEach((c) => gsap.to(c.g as any, { slow: 1, duration: 0.6 }));
-  }
-
-  private halfHop(x: number) {
-    return new Promise<void>((done) => {
-      gsap.timeline({ onComplete: done })
-        .to(this.chicken, { x, duration: 0.2, ease: 'power1.out' })
-        .to(this.chickenBody, { y: -28, duration: 0.1 }, '<')
-        .to(this.chickenBody, { y: 0, duration: 0.1 });
-    });
-  }
-
-  private feathers(x: number, y: number) {
-    for (let i = 0; i < 22; i++) {
-      const f = new Graphics().ellipse(0, 0, 7, 3).fill(i % 3 ? 0xffffff : 0xfca5a5);
-      f.position.set(x, y);
-      f.rotation = Math.random() * 6;
-      this.fx.addChild(f);
-      const a = Math.random() * Math.PI * 2, d = 70 + Math.random() * 130;
-      gsap.to(f, { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d - 40, rotation: f.rotation + 5, alpha: 0, duration: 0.9 + Math.random() * 0.5, ease: 'power2.out', onComplete: () => f.destroy() });
+  private dust(x: number) {
+    for (let i = 0; i < 8; i++) {
+      const p = new Graphics().circle(0, 0, 3 + Math.random() * 3).fill({ color: 0xcfd3e6, alpha: 0.7 });
+      p.position.set(x + (Math.random() - 0.5) * 30, CURB - 2);
+      this.fxLayer.addChild(p);
+      gsap.to(p, { x: p.x + (i % 2 ? 1 : -1) * (14 + Math.random() * 22), y: CURB - 14 - Math.random() * 14, alpha: 0, duration: 0.45, ease: 'power2.out', onComplete: () => p.destroy() });
     }
+  }
+
+  private pulseCoin(lane: number) {
+    const c = this.coins[lane];
+    if (!c) return;
+    gsap.fromTo(c.box.scale, { x: 1, y: 1 }, { x: 1.14, y: 1.14, duration: 0.14, yoyo: true, repeat: 1, ease: 'power2.out' });
+  }
+
+  /** Chicken steps into the lane, fire bursts from the grate, a roast chicken is left on a plate. */
+  async hopBust(lane: number) {
+    await this.hop(this.posX(lane));
+    this.lane = lane;
+    this.layout(true);
+    this.drawGlow(0);
+    const coin = this.coins[lane];
+    const x = this.posX(lane);
+    this.idle(false);
+    // the grate rumbles, then fire
+    await gsap.to(this.chicken, { x: x + 2, duration: 0.05, yoyo: true, repeat: 5 });
+    if (coin) this.paintCoin(coin, 'red');
+    this.fire(x);
+    this.shake();
+    gsap.to(this.chicken, { alpha: 0, duration: 0.12 });
+    this.plate(x);
+    await new Promise((r) => setTimeout(r, 650));
+  }
+
+  private fire(x: number) {
+    const holder = new Container();
+    this.fxLayer.addChild(holder);
+    // heat glow
+    const heat = new Graphics().rect(x - LW / 2, -400, LW, CURB + 400).fill({ color: 0xff5a1f, alpha: 0.07 });
+    holder.addChild(heat);
+    gsap.fromTo(heat, { alpha: 0 }, { alpha: 1, duration: 0.2 });
+    const specs = [[-34, 0.8], [-14, 1.0], [12, 0.95], [34, 0.75], [0, 1.2], [-24, 0.6], [24, 0.65]];
+    specs.forEach(([dx, s], i) => {
+      const f = new Container();
+      f.position.set(x + dx, CURB - 20);
+      const outer = this.flamePath(new Graphics(), 0, 0, 22, 150).fill(0xff3b1f);
+      const mid = this.flamePath(new Graphics(), 0, 0, 14, 112).fill(0xff8a1f);
+      const core = this.flamePath(new Graphics(), 0, 0, 8, 70).fill(0xffd23f);
+      f.addChild(outer, mid, core);
+      f.scale.set(0.2);
+      holder.addChild(f);
+      const h = s * 0.95 + 0.25;
+      gsap.to(f.scale, { x: s * 1.0, y: h, duration: 0.28, ease: 'power2.out', delay: i * 0.025 });
+      this.fires.push(gsap.to(f.scale, { y: h * 1.14, x: s * 0.92, duration: 0.22 + (i % 3) * 0.06, yoyo: true, repeat: -1, ease: 'sine.inOut', delay: 0.3 }));
+      this.fires.push(gsap.to(f, { rotation: (i % 2 ? 1 : -1) * 0.08, duration: 0.3 + i * 0.03, yoyo: true, repeat: -1, ease: 'sine.inOut' }));
+    });
+    // embers
+    for (let i = 0; i < 18; i++) {
+      const e = new Graphics().circle(0, 0, 2 + Math.random() * 2.5).fill(i % 2 ? 0xffd23f : 0xff7a1f);
+      e.position.set(x + (Math.random() - 0.5) * 70, CURB - 30);
+      holder.addChild(e);
+      this.fires.push(gsap.to(e, { y: -80 - Math.random() * 220, x: e.x + (Math.random() - 0.5) * 80, alpha: 0, duration: 0.9 + Math.random() * 0.9, repeat: -1, delay: Math.random() * 0.8, ease: 'power1.out' }));
+    }
+  }
+
+  private plate(x: number) {
+    const r = new Container();
+    r.position.set(x, CURB);
+    const g = new Graphics();
+    g.ellipse(0, -3, 50, 10).fill(0xdadbe6).ellipse(0, -6, 46, 8).fill(0xf5f5fa);
+    g.ellipse(0, -26, 36, 24).fill(0xb4601a);
+    g.ellipse(-4, -33, 26, 13).fill({ color: 0xe2933a, alpha: 0.95 });
+    g.ellipse(8, -22, 22, 12).fill({ color: 0x8f4710, alpha: 0.55 });
+    g.roundRect(-52, -38, 24, 11, 5).fill(0xc9772a);                 // drumstick
+    g.circle(-54, -34, 6).fill(0xf3ead9);
+    g.moveTo(-8, -32).lineTo(0, -24).stroke({ width: 3, color: 0x3a1b05 });
+    g.moveTo(0, -32).lineTo(-8, -24).stroke({ width: 3, color: 0x3a1b05 });
+    g.moveTo(12, -32).lineTo(20, -24).stroke({ width: 3, color: 0x3a1b05 });
+    g.moveTo(20, -32).lineTo(12, -24).stroke({ width: 3, color: 0x3a1b05 });
+    r.addChild(g);
+    r.scale.set(0.2);
+    this.fxLayer.addChild(r);
+    gsap.to(r.scale, { x: 1, y: 1, duration: 0.45, ease: 'back.out(2.2)' });
+    this.roast = r;
   }
 
   private shake() {
     const x0 = this.world.x;
-    gsap.fromTo(this.world, { x: x0 - 10 }, { x: x0, duration: 0.45, ease: 'elastic.out(1.4, 0.25)' });
+    gsap.fromTo(this.world, { x: x0 - 9 }, { x: x0, duration: 0.5, ease: 'elastic.out(1.6, 0.3)' });
   }
 
-  /** Coins burst from the chicken and "+win" floats up. */
+  private stopFire() {
+    this.fires.forEach((t) => t.kill());
+    this.fires = [];
+  }
+
+  /** The chicken reaches the golden egg. */
+  async finishRun() {
+    const f = this.finale;
+    if (!f) return;
+    const cx = f.egg.x;
+    this.drawGlow(0);
+    await this.hop(cx - 66);
+    this.lane = this.lanes;
+    this.layout(true);
+    gsap.fromTo(f.egg.scale, { x: 1, y: 1 }, { x: 1.25, y: 1.25, duration: 0.25, yoyo: true, repeat: 1, ease: 'power2.out' });
+  }
+
+  /** Coins burst from the chicken and the payout floats up. */
   celebrate(win: number, label: string) {
-    const { x, y } = this.chicken.position;
+    const { x } = this.chicken.position;
+    const y = CURB - 60;
     for (let i = 0; i < 26; i++) {
-      const c = new Graphics().circle(0, 0, 8).fill(0xfbbf24).circle(0, 0, 8).stroke({ width: 2, color: 0xb45309 });
-      c.position.set(x, y - 20);
-      this.fx.addChild(c);
-      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, d = 90 + Math.random() * 190;
-      gsap.to(c, { x: x + Math.cos(a) * d, y: y - 20 + Math.sin(a) * d, duration: 0.55, ease: 'power2.out' });
-      gsap.to(c, { y: '+=140', alpha: 0, duration: 0.6, delay: 0.55, ease: 'power2.in', onComplete: () => c.destroy() });
+      const c = new Graphics().circle(0, 0, 7).fill(0xf8c61c).circle(0, 0, 7).stroke({ width: 2, color: 0xb98a1c });
+      c.position.set(x, y);
+      this.fxLayer.addChild(c);
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, d = 70 + Math.random() * 150;
+      gsap.to(c, { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, duration: 0.5, ease: 'power2.out' });
+      gsap.to(c, { y: '+=120', alpha: 0, duration: 0.55, delay: 0.5, ease: 'power2.in', onComplete: () => c.destroy() });
     }
-    const t = new Text({ text: `${label}\n+${win.toFixed(2)}`, style: new TextStyle({ ...labelStyle(40, 0x86efac), align: 'center' }) });
+    const t = new Text({ text: `${label}\n+${win.toFixed(2)}`, style: new TextStyle({ fontFamily: font, fontSize: 30, fontWeight: '800', fill: 0xffffff, align: 'center', stroke: { color: 0x1a6b34, width: 6 } }) });
     t.anchor.set(0.5);
-    t.position.set(x, y - 110);
-    this.fx.addChild(t);
-    gsap.to(t, { y: y - 190, alpha: 0, duration: 1.4, delay: 0.5, ease: 'power1.out', onComplete: () => t.destroy() });
-  }
-
-  /** Idle bob so the chicken looks alive between taps. */
-  idle(on: boolean) {
-    gsap.killTweensOf(this.chickenBody, 'y');
-    if (on) gsap.to(this.chickenBody, { y: -6, duration: 0.6, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-    else this.chickenBody.y = 0;
+    t.position.set(x, y - 150);
+    this.fxLayer.addChild(t);
+    gsap.fromTo(t.scale, { x: 0.4, y: 0.4 }, { x: 1, y: 1, duration: 0.25, ease: 'back.out(2)' });
+    gsap.to(t, { y: y - 210, alpha: 0, duration: 1.2, delay: 0.7, ease: 'power1.out', onComplete: () => t.destroy() });
   }
 }

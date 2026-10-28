@@ -35,7 +35,7 @@ const num = (s) => parseFloat(String(s).replace(/[^\d.]/g, ''));
 
   const rounds = [];
   for (let i = 0; i < 6; i++) {
-    const diff = ['medium', 'hard', 'easy', 'daredevil', 'medium', 'hard'][i];
+    const diff = ['medium', 'hard', 'easy', 'hardcore', 'medium', 'hard'][i];
     await page.click(`#difficulty button[data-d="${diff}"]`);
     await page.fill('#betInput', '100');
     const before = await bal();
@@ -45,9 +45,9 @@ const num = (s) => parseFloat(String(s).replace(/[^\d.]/g, ''));
     const target = 1 + (i % 4);                       // cross this many lanes, then cash out
     let lanes = 0, busted = false;
     while (lanes < target) {
-      await page.click('#cross');
-      await page.waitForFunction(() => !document.querySelector('#cross').disabled || document.querySelector('#run').hidden, null, { timeout: 15000 });
-      if (await page.$eval('#run', (e) => e.hidden)) { busted = /Squashed|across/i.test(await page.textContent('#statusMain')) && /Squashed/i.test(await page.textContent('#statusMain')); break; }
+      await page.click('#go');
+      await page.waitForFunction(() => !document.querySelector('#go').disabled || document.querySelector('#run').hidden, null, { timeout: 15000 });
+      if (await page.$eval('#run', (e) => e.hidden)) { busted = true; break; }
       lanes++;
       if (i === 0 && lanes === 1) await shot('2-after-first-hop');
     }
@@ -55,17 +55,17 @@ const num = (s) => parseFloat(String(s).replace(/[^\d.]/g, ''));
     if (!finished) {
       check(!(await page.$eval('#cash', (e) => e.disabled)), `round ${i}: cash out disabled after crossing`);
       if (i === 1) await shot('3-mid-run');
-      const shown = num(await page.textContent('#cashAmt'));
+      const shown = num((await page.textContent('#cashAmt')).replace(/USD/, ''));
       await page.click('#cash');
-      await page.waitForSelector('#setup:not([hidden])');
+      await page.waitForSelector('#play:not([hidden])');
       const after = await bal();
       check(Math.abs(after - (before - 100 + shown)) < 0.011, `round ${i}: cash out paid ${after - before + 100}, button promised ${shown}`);
       rounds.push({ diff, lanes, result: 'cash', net: +(after - before).toFixed(2) });
       if (i === 0) await shot('4-cashed');
     } else {
-      const main = await page.textContent('#statusMain');
+      const main = await page.textContent('#toast');
       const after = await bal();
-      if (/Squashed/i.test(main)) { check(Math.abs(after - (before - 100)) < 0.005, `round ${i}: bust should lose exactly the stake`); await shot(`5-bust-${i}`); rounds.push({ diff, lanes, result: 'bust', net: -100 }); }
+      if (/Lost/i.test(main)) { check(Math.abs(after - (before - 100)) < 0.005, `round ${i}: bust should lose exactly the stake`); await shot(`5-bust-${i}`); rounds.push({ diff, lanes, result: 'bust', net: -100 }); }
       else rounds.push({ diff, lanes, result: main, net: +(after - before).toFixed(2) });
     }
     check(await page.$eval('#play', (e) => !e.hidden), `round ${i}: Play button not back`);
