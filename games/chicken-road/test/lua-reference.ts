@@ -1,5 +1,6 @@
-// Browser/Node runner for open-rgs Lua math. Mirrors @open-rgs/core's loadLuaMath (same host surface,
-// same json/params prelude, same open/step/close/autoclose calls) without its Bun-only file and crypto APIs.
+// TEST ONLY. Runs the original open-rgs Lua through wasmoon, mirroring @open-rgs/core 1.7.0's loadLuaMath (same host
+// surface, same json/params prelude, same open/step/close/autoclose calls), so the TypeScript port can be proven
+// equal to the Lua it was ported from. Not part of the shipped game.
 import { LuaFactory } from 'wasmoon';
 
 export interface Op { kind: string; action: string; [k: string]: unknown }

@@ -1,5 +1,4 @@
 node_modules
 dist
-public/glue.wasm
-src/rgs/lua
+test/lua
 e2e-out

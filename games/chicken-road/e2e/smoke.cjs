@@ -5,7 +5,7 @@ const root = process.env.ROOT || path.join(__dirname, '../dist');
 const outDir = process.argv[2] || path.join(__dirname, '../e2e-out');
 const [W, H] = (process.argv[3] || '390x844').split('x').map(Number);
 fs.mkdirSync(outDir, { recursive: true });
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.png': 'image/png', '.json': 'application/json' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
   const p = path.join(root, decodeURIComponent(req.url.split('?')[0]).replace(/\/$/, '/index.html'));
   fs.readFile(p, (e, b) => { if (e) { res.writeHead(404); return res.end('nf'); } res.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' }); res.end(b); });
@@ -28,12 +28,11 @@ const num = (s) => parseFloat(String(s).replace(/[^\d.]/g, ''));
 
   // simulate a device/mode with no WebGL at all (iPhone Lockdown Mode, some in-app browsers)
   if (process.env.NO_WEBGL) await page.addInitScript(() => { for (const C of [HTMLCanvasElement, window.OffscreenCanvas].filter(Boolean)) { const g = C.prototype.getContext; C.prototype.getContext = function (t, ...a) { return /webgl|experimental/.test(t) ? null : g.call(this, t, ...a); }; } });
-  if (process.env.NO_WASM) await page.route('**/glue.wasm', (r) => r.abort());
   await page.goto(base + '?seed=3');
   await page.waitForSelector('html[data-ready="1"]', { timeout: 30000 });
   const mathSrc = await page.textContent('#mathSrc');
   if (process.env.NO_WEBGL) check(await page.evaluate(() => document.documentElement.dataset.renderer) === 'canvas', 'did not fall back to canvas');
-  check(process.env.NO_WASM ? /JS port/.test(mathSrc) : /Lua/.test(mathSrc), 'unexpected math source: ' + mathSrc);
+  check(/TypeScript/.test(mathSrc), 'unexpected math source: ' + mathSrc);
   await page.waitForTimeout(600);
   await shot('1-idle');
 

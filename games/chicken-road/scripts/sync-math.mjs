@@ -1,4 +1,5 @@
-// Copies the unmodified open-rgs Lua files into src/rgs/lua so the app bundles exactly what the repo ships.
+// Copies the unmodified open-rgs Lua files into test/lua. The Lua is only the REFERENCE the TypeScript port is
+// proven equal to (test/math.test.ts); the shipped game runs maths/chicken-road.ts.
 import { cpSync, mkdirSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v = join(here, '../../../vendor/open-rgs-examples');
-const out = join(here, '../src/rgs/lua');
+const out = join(here, '../test/lua');
 mkdirSync(out, { recursive: true });
 for (const [from, to] of [
   ['games/chicken-road/maths/chicken-road.lua', 'chicken-road.lua'],
@@ -16,9 +17,3 @@ for (const [from, to] of [
   cpSync(join(v, from), join(out, to));
   console.log(to, createHash('sha256').update(readFileSync(join(v, from))).digest('hex').slice(0, 12));
 }
-
-// wasmoon's Lua VM; the app fetches it next to index.html
-const wasm = join(here, '../node_modules/wasmoon/dist/glue.wasm');
-mkdirSync(join(here, '../public'), { recursive: true });
-cpSync(wasm, join(here, '../public/glue.wasm'));
-console.log('glue.wasm copied');

@@ -2,8 +2,9 @@
   "compilerOptions": {
     "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true, "noEmit": true, "skipLibCheck": true, "allowImportingTsExtensions": true,
-    "types": ["vite/client", "node"], "isolatedModules": true
+    "types": ["vite/client", "node"], "isolatedModules": true,
+    "baseUrl": ".", "paths": { "@open-rgs/contract": ["../../vendor/open-rgs-core/contract/index.ts"] }
   },
-  "include": ["src", "test"],
+  "include": ["src", "maths", "test", "../../vendor/open-rgs-core/core/money.ts"],
   "exclude": ["test/real-core.ts"]
 }
